@@ -1,5 +1,5 @@
-local BezierCurveVFX = {}
-BezierCurveVFX.__index = BezierCurveVFX
+local visualBezier = {}
+visualBezier.__index = visualBezier
 
 local RunService = game:GetService("RunService")
 
@@ -84,8 +84,8 @@ local function applyCurveOffsets(points, offsets)
 	return modifiedPoints
 end
 
-function BezierCurveVFX.new(attachment, target, settings)
-	local self = setmetatable({}, BezierCurveVFX)
+function visualBezier.new(attachment, target, settings)
+	local self = setmetatable({}, visualBezier)
 
 	assert(attachment, "Attachment is required")
 	assert(target, "Target is required")
@@ -116,7 +116,7 @@ function BezierCurveVFX.new(attachment, target, settings)
 	return self
 end
 
-function BezierCurveVFX:getTargetPosition()
+function visualBezier:getTargetPosition()
 	if typeof(self.target) == "Vector3" then
 		return self.target
 	elseif typeof(self.target) == "Instance" and self.target:IsA("BasePart") then
@@ -128,7 +128,7 @@ function BezierCurveVFX:getTargetPosition()
 	end
 end
 
-function BezierCurveVFX:regenerateCurveFromPosition(startPos)
+function visualBezier:regenerateCurveFromPosition(startPos)
 	local endPos = self:getTargetPosition()
 
 	if self.points then
@@ -168,7 +168,7 @@ function BezierCurveVFX:regenerateCurveFromPosition(startPos)
 
 	self.lastTargetPosition = endPos
 end
-function BezierCurveVFX:updateTargetVelocity()
+function visualBezier:updateTargetVelocity()
 	if not self.keepTrack then
 		return
 	end
@@ -187,7 +187,7 @@ function BezierCurveVFX:updateTargetVelocity()
 	self.lastTargetUpdateTime = currentTime
 end
 
-function BezierCurveVFX:getPredictedTargetPosition(futureTime)
+function visualBezier:getPredictedTargetPosition(futureTime)
 	local currentPos = self:getTargetPosition()
 	if not self.keepTrack or self.targetVelocity.Magnitude < 0.1 then
 		return currentPos
@@ -197,7 +197,7 @@ function BezierCurveVFX:getPredictedTargetPosition(futureTime)
 	return prediction
 end
 
-function BezierCurveVFX:getAdaptiveCurvePosition(t)
+function visualBezier:getAdaptiveCurvePosition(t)
 	if #self.baseCurvePoints < 2 then
 		return Vector3.new(0, 0, 0)
 	end
@@ -227,7 +227,7 @@ function BezierCurveVFX:getAdaptiveCurvePosition(t)
 	end
 end
 
-function BezierCurveVFX:generateCurvePoints()
+function visualBezier:generateCurvePoints()
 	local startPos = self.attachment.WorldPosition
 	local endPos = self:getTargetPosition()
 
@@ -267,7 +267,7 @@ function BezierCurveVFX:generateCurvePoints()
 	self.lastTargetPosition = endPos
 end
 
-function BezierCurveVFX:updatePosition(rawProgress)
+function visualBezier:updatePosition(rawProgress)
 	if #self.baseCurvePoints < 2 then
 		return
 	end
@@ -281,7 +281,7 @@ function BezierCurveVFX:updatePosition(rawProgress)
 	end
 end
 
-function BezierCurveVFX:start()
+function visualBezier:start()
 	if self.isActive then
 		self:stop()
 	end
@@ -320,7 +320,7 @@ function BezierCurveVFX:start()
 	end)
 end
 
-function BezierCurveVFX:stop()
+function visualBezier:stop()
 	self.isActive = false
 	if self.currentConnection then
 		self.currentConnection:Disconnect()
@@ -328,7 +328,7 @@ function BezierCurveVFX:stop()
 	end
 end
 
-function BezierCurveVFX:updateSettings(newSettings)
+function visualBezier:updateSettings(newSettings)
 	for key, value in pairs(newSettings) do
 		self.settings[key] = value
 		self[key] = value
@@ -339,7 +339,7 @@ function BezierCurveVFX:updateSettings(newSettings)
 	end
 end
 
-function BezierCurveVFX:updateTarget(newTarget)
+function visualBezier:updateTarget(newTarget)
 	self.target = newTarget
 	if self.isActive then
 		self:generateCurvePoints()
@@ -347,7 +347,7 @@ function BezierCurveVFX:updateTarget(newTarget)
 	end
 end
 
-function BezierCurveVFX:getPreviewPoints(resolution)
+function visualBezier:getPreviewPoints(resolution)
 	resolution = resolution or 20
 	local previewPoints = {}
 
@@ -364,12 +364,12 @@ function BezierCurveVFX:getPreviewPoints(resolution)
 	return previewPoints
 end
 
-function BezierCurveVFX:destroy()
+function visualBezier:destroy()
 	self:stop()
 	setmetatable(self, nil)
 end
 
-function BezierCurveVFX.createExample()
+function visualBezier.createExample()
 	local startPart = Instance.new("Part")
 	startPart.Size = Vector3.new(2, 2, 2)
 	startPart.Position = Vector3.new(0, 5, 0)
@@ -476,10 +476,10 @@ function BezierCurveVFX.createExample()
 	--     }
 	-- }
 
-	local curveVFX = BezierCurveVFX.new(attachmentConstraint, endPart, settings)
+	local curveVFX = visualBezier.new(attachmentConstraint, endPart, settings)
 	curveVFX:start()
 
 	return curveVFX
 end
 
-return BezierCurveVFX
+return visualBezier
