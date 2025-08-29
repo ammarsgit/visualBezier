@@ -1,6 +1,6 @@
-# BezierCurveVFX
+# visualBezier
 
-**BezierCurveVFX** is a Lua module that provides a flexible system for generating and animating Bezier curve-based visual effects.  
+**visualBezier** is a Lua module that provides a flexible system for generating and animating Bezier curve-based visual effects.  
 It is useful for smooth particle/projectile motion, dynamic effects such as energy trails, experience orbs, guided missiles, or any situation requiring curved paths.
 
 ---
@@ -20,11 +20,11 @@ It is useful for smooth particle/projectile motion, dynamic effects such as ener
 ---
 
 ## Installation
-1. Copy `BezierCurveVFX.lua` into your project (e.g., inside `ReplicatedStorage` for shared access).  
+1. Copy `visualBezier.lua` into your project (e.g., inside `ReplicatedStorage` for shared access).  
 2. Require it from your script:
 
 ```lua
-local BezierCurveVFX = require(game.ReplicatedStorage.BezierCurveVFX)
+local visualBezier = require(game.ReplicatedStorage.visualBezier)
 ```
 
 ---
@@ -33,7 +33,7 @@ local BezierCurveVFX = require(game.ReplicatedStorage.BezierCurveVFX)
 
 ### Basic Example
 ```lua
-local curveVFX = BezierCurveVFX.new(
+local curveVFX = visualBezier.new(
     attachment, -- Starting attachment
     target,     -- Target (Vector3, BasePart, or Attachment)
     {
@@ -81,8 +81,8 @@ curveVFX:start()
 The module includes a built-in example that creates two anchored parts and animates a glowing orb along a Bezier curve between them:
 
 ```lua
-local BezierCurveVFX = require(game.ReplicatedStorage.BezierCurveVFX)
-BezierCurveVFX.createExample()
+local visualBezier = require(game.ReplicatedStorage.visualBezier)
+visualBezier.createExample()
 ```
 
 ---
