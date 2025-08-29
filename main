@@ -1,0 +1,485 @@
+local BezierCurveVFX = {}
+BezierCurveVFX.__index = BezierCurveVFX
+
+local RunService = game:GetService("RunService")
+
+local function lerp(a, b, t)
+	return a + (b - a) * t
+end
+
+local function lerpVector3(a, b, t)
+	return Vector3.new(
+		lerp(a.X, b.X, t),
+		lerp(a.Y, b.Y, t),
+		lerp(a.Z, b.Z, t)
+	)
+end
+
+local function calculateBezier(points, t)
+	if #points == 1 then
+		return points[1]
+	end
+
+	local newPoints = {}
+	for i = 1, #points - 1 do
+		table.insert(newPoints, lerpVector3(points[i], points[i + 1], t))
+	end
+
+	return calculateBezier(newPoints, t)
+end
+
+local function createRandomCurve(startPos, endPos, randomization)
+	local distance = (endPos - startPos).Magnitude
+	local direction = (endPos - startPos).Unit
+	local perpendicular1 = direction:Cross(Vector3.new(0, 1, 0))
+	if perpendicular1.Magnitude < 0.1 then
+		perpendicular1 = direction:Cross(Vector3.new(1, 0, 0))
+	end
+	perpendicular1 = perpendicular1.Unit
+	local perpendicular2 = direction:Cross(perpendicular1).Unit
+
+	local points = {startPos}
+
+	local numControlPoints = math.random(2, 3)
+
+	for i = 1, numControlPoints do
+		local t = i / (numControlPoints + 1)
+		local basePoint = startPos:lerp(endPos, t)
+
+		local waveOffset1 = math.sin(t * math.pi * 2 + math.random() * math.pi * 2) * randomization * distance * 0.3
+		local waveOffset2 = math.cos(t * math.pi * 3 + math.random() * math.pi * 2) * randomization * distance * 0.2
+		local heightVariation = math.sin(t * math.pi) * randomization * distance * 0.4
+
+		local randomOffset = 
+			perpendicular1 * waveOffset1 +
+			perpendicular2 * waveOffset2 +
+			Vector3.new(0, heightVariation, 0)
+
+		randomOffset = randomOffset + Vector3.new(
+			(math.random() - 0.5) * randomization * distance * 0.1,
+			(math.random() - 0.5) * randomization * distance * 0.1,
+			(math.random() - 0.5) * randomization * distance * 0.1
+		)
+
+		table.insert(points, basePoint + randomOffset)
+	end
+
+	table.insert(points, endPos)
+	return points
+end
+
+local function applyCurveOffsets(points, offsets)
+	if not offsets or #offsets == 0 then
+		return points
+	end
+
+	local modifiedPoints = {}
+	for i, point in ipairs(points) do
+		if i > 1 and i < #points and offsets[i-1] then
+			modifiedPoints[i] = point + offsets[i-1]
+		else
+			modifiedPoints[i] = point
+		end
+	end
+	return modifiedPoints
+end
+
+function BezierCurveVFX.new(attachment, target, settings)
+	local self = setmetatable({}, BezierCurveVFX)
+
+	assert(attachment, "Attachment is required")
+	assert(target, "Target is required")
+
+	self.attachment = attachment
+	self.target = target
+	self.settings = settings or {}
+
+	self.randomOffsets = self.settings.randomOffsets or false
+	self.offsets = self.settings.offsets or {}
+	self.points = self.settings.points or nil
+	self.keepTrack = self.settings.keepTrack or false
+	self.duration = self.settings.duration or 2
+	self.randomization = self.settings.randomization or 0.3
+	self.speed = self.settings.speed or nil
+	self.adaptiveSmoothing = self.settings.adaptiveSmoothing ~= false
+
+	self.isActive = false
+	self.currentConnection = nil
+	self.startTime = 0
+	self.curvePoints = {}
+	self.baseCurvePoints = {} -- Original curve points
+	self.lastTargetPosition = nil
+	self.currentProgress = 0
+	self.targetVelocity = Vector3.new(0, 0, 0)
+	self.lastTargetUpdateTime = 0
+
+	return self
+end
+
+function BezierCurveVFX:getTargetPosition()
+	if typeof(self.target) == "Vector3" then
+		return self.target
+	elseif typeof(self.target) == "Instance" and self.target:IsA("BasePart") then
+		return self.target.Position
+	elseif typeof(self.target) == "Instance" and self.target:IsA("Attachment") then
+		return self.target.WorldPosition
+	else
+		error("Target must be a Vector3, BasePart, or Attachment")
+	end
+end
+
+function BezierCurveVFX:regenerateCurveFromPosition(startPos)
+	local endPos = self:getTargetPosition()
+
+	if self.points then
+		self.baseCurvePoints = {startPos}
+		local originalStart = self.baseCurvePoints[1] or startPos
+		for _, point in ipairs(self.points) do
+			local offsetPoint = point + (startPos - originalStart)
+			table.insert(self.baseCurvePoints, offsetPoint)
+		end
+		table.insert(self.baseCurvePoints, endPos)
+	else
+		self.baseCurvePoints = createRandomCurve(startPos, endPos, self.randomization)
+	end
+
+	if #self.offsets > 0 then
+		self.baseCurvePoints = applyCurveOffsets(self.baseCurvePoints, self.offsets)
+	end
+
+	self.curvePoints = {}
+	for i, point in ipairs(self.baseCurvePoints) do
+		self.curvePoints[i] = point
+	end
+
+	if self.speed then
+		local totalDistance = 0
+		for i = 1, 100 do
+			local t1 = (i-1) / 99
+			local t2 = i / 99
+			local pos1 = calculateBezier(self.baseCurvePoints, t1)
+			local pos2 = calculateBezier(self.baseCurvePoints, t2)
+			totalDistance = totalDistance + (pos2 - pos1).Magnitude
+		end
+		self.actualDuration = totalDistance / self.speed
+	else
+		self.actualDuration = self.duration
+	end
+
+	self.lastTargetPosition = endPos
+end
+function BezierCurveVFX:updateTargetVelocity()
+	if not self.keepTrack then
+		return
+	end
+
+	local currentPos = self:getTargetPosition()
+	local currentTime = tick()
+
+	if self.lastTargetPosition and self.lastTargetUpdateTime > 0 then
+		local deltaTime = currentTime - self.lastTargetUpdateTime
+		if deltaTime > 0 then
+			self.targetVelocity = (currentPos - self.lastTargetPosition) / deltaTime
+		end
+	end
+
+	self.lastTargetPosition = currentPos
+	self.lastTargetUpdateTime = currentTime
+end
+
+function BezierCurveVFX:getPredictedTargetPosition(futureTime)
+	local currentPos = self:getTargetPosition()
+	if not self.keepTrack or self.targetVelocity.Magnitude < 0.1 then
+		return currentPos
+	end
+
+	local prediction = currentPos + (self.targetVelocity * futureTime * 0.5)
+	return prediction
+end
+
+function BezierCurveVFX:getAdaptiveCurvePosition(t)
+	if #self.baseCurvePoints < 2 then
+		return Vector3.new(0, 0, 0)
+	end
+
+	if not self.keepTrack then
+		return calculateBezier(self.baseCurvePoints, t)
+	end
+
+	local currentTarget = self:getTargetPosition()
+	local originalTarget = self.baseCurvePoints[#self.baseCurvePoints]
+
+	local extendedPoints = {}
+	for i, point in ipairs(self.baseCurvePoints) do
+		if i == #self.baseCurvePoints then
+			extendedPoints[i] = currentTarget
+		else
+			extendedPoints[i] = point
+		end
+	end
+
+	if t > 1 then
+		local extendedT = math.min((t - 1) * 2, 1) -- Slow down extension
+		local lastPoint = calculateBezier(self.baseCurvePoints, 1)
+		return lastPoint:lerp(currentTarget, extendedT)
+	else
+		return calculateBezier(extendedPoints, t)
+	end
+end
+
+function BezierCurveVFX:generateCurvePoints()
+	local startPos = self.attachment.WorldPosition
+	local endPos = self:getTargetPosition()
+
+	if self.points then
+		self.baseCurvePoints = {startPos}
+		for _, point in ipairs(self.points) do
+			table.insert(self.baseCurvePoints, point)
+		end
+		table.insert(self.baseCurvePoints, endPos)
+	else
+		self.baseCurvePoints = createRandomCurve(startPos, endPos, self.randomization)
+	end
+
+	if #self.offsets > 0 then
+		self.baseCurvePoints = applyCurveOffsets(self.baseCurvePoints, self.offsets)
+	end
+
+	self.curvePoints = {}
+	for i, point in ipairs(self.baseCurvePoints) do
+		self.curvePoints[i] = point
+	end
+
+	if self.speed then
+		local totalDistance = 0
+		for i = 1, 100 do
+			local t1 = (i-1) / 99
+			local t2 = i / 99
+			local pos1 = calculateBezier(self.baseCurvePoints, t1)
+			local pos2 = calculateBezier(self.baseCurvePoints, t2)
+			totalDistance = totalDistance + (pos2 - pos1).Magnitude
+		end
+		self.actualDuration = totalDistance / self.speed
+	else
+		self.actualDuration = self.duration
+	end
+
+	self.lastTargetPosition = endPos
+end
+
+function BezierCurveVFX:updatePosition(rawProgress)
+	if #self.baseCurvePoints < 2 then
+		return
+	end
+
+	local easedProgress = rawProgress * rawProgress * (3 - 2 * rawProgress) -- Smoothstep
+
+	local position = self:getAdaptiveCurvePosition(easedProgress)
+
+	if self.attachment.Parent then
+		self.attachment.Parent.CFrame = CFrame.new(position)
+	end
+end
+
+function BezierCurveVFX:start()
+	if self.isActive then
+		self:stop()
+	end
+
+	self.isActive = true
+	self.startTime = tick()
+	self.currentProgress = 0
+	self:generateCurvePoints()
+
+	self.currentConnection = RunService.Heartbeat:Connect(function()
+		local elapsed = tick() - self.startTime
+
+		if self.keepTrack then
+			local rawProgress = elapsed / self.actualDuration
+
+			self:updateTargetVelocity()
+
+			if rawProgress >= 1 then
+				local currentPos = self.attachment.Parent and self.attachment.Parent.Position or self.attachment.WorldPosition
+				self:regenerateCurveFromPosition(currentPos)
+				self.startTime = tick()
+				rawProgress = 0
+			end
+
+			self:updatePosition(rawProgress)
+			self.currentProgress = rawProgress
+		else
+			local rawProgress = math.min(elapsed / self.actualDuration, 1)
+			self:updatePosition(rawProgress)
+			self.currentProgress = rawProgress
+
+			if rawProgress >= 1 then
+				self:stop()
+			end
+		end
+	end)
+end
+
+function BezierCurveVFX:stop()
+	self.isActive = false
+	if self.currentConnection then
+		self.currentConnection:Disconnect()
+		self.currentConnection = nil
+	end
+end
+
+function BezierCurveVFX:updateSettings(newSettings)
+	for key, value in pairs(newSettings) do
+		self.settings[key] = value
+		self[key] = value
+	end
+
+	if self.isActive then
+		self:generateCurvePoints()
+	end
+end
+
+function BezierCurveVFX:updateTarget(newTarget)
+	self.target = newTarget
+	if self.isActive then
+		self:generateCurvePoints()
+		self.startTime = tick()
+	end
+end
+
+function BezierCurveVFX:getPreviewPoints(resolution)
+	resolution = resolution or 20
+	local previewPoints = {}
+
+	if #self.curvePoints < 2 then
+		self:generateCurvePoints()
+	end
+
+	for i = 0, resolution do
+		local t = i / resolution
+		local point = calculateBezier(self.curvePoints, t)
+		table.insert(previewPoints, point)
+	end
+
+	return previewPoints
+end
+
+function BezierCurveVFX:destroy()
+	self:stop()
+	setmetatable(self, nil)
+end
+
+function BezierCurveVFX.createExample()
+	local startPart = Instance.new("Part")
+	startPart.Size = Vector3.new(2, 2, 2)
+	startPart.Position = Vector3.new(0, 5, 0)
+	startPart.Anchored = true
+	startPart.BrickColor = BrickColor.new("Bright red")
+	startPart.Parent = workspace
+
+	local endPart = Instance.new("Part")
+	endPart.Size = Vector3.new(2, 2, 2)
+	endPart.Position = Vector3.new(20, 10, 15)
+	endPart.Anchored = true
+	endPart.BrickColor = BrickColor.new("Bright blue")
+	endPart.Parent = workspace
+
+	local attachment = Instance.new("Attachment")
+	attachment.Parent = startPart
+
+	local particle = Instance.new("Part")
+	particle.Size = Vector3.new(0.5, 0.5, 0.5)
+	particle.Shape = Enum.PartType.Ball
+	particle.Material = Enum.Material.Neon
+	particle.BrickColor = BrickColor.new("Bright yellow")
+	particle.CanCollide = false
+	particle.Anchored = true
+	particle.Parent = workspace
+
+	local pointLight = Instance.new("PointLight")
+	pointLight.Brightness = 2
+	pointLight.Color = Color3.new(1, 1, 0)
+	pointLight.Range = 5
+	pointLight.Parent = particle
+
+	local attachmentConstraint = Instance.new("Attachment")
+	attachmentConstraint.Parent = particle
+
+	local settings = {
+		randomOffsets = false,        -- Use built-in randomization instead
+		offsets = {},                 -- Custom Vector3 offsets: {Vector3.new(5, 2, 0), Vector3.new(-3, 8, 1)}
+		points = nil,                 -- Custom control points: {Vector3.new(10, 15, 5), Vector3.new(15, 8, 10)}
+		keepTrack = true,            -- Continuously follow moving targets
+
+		-- Timing settings
+		duration = 2.5,              -- Time for initial curve (seconds)
+		speed = 2,                 -- Alternative: studs per second (overrides duration)
+
+		-- Curve appearance
+		randomization = .2,         -- How wavy/random curves are (0.1 = subtle, 1.0 = very chaotic)
+
+		-- Advanced settings
+		adaptiveSmoothing = true     -- Smooth adaptation to moving targets (enabled by default)
+	}
+
+	-- Example setting combinations:
+
+	-- 1. Basic smooth following (like XP orbs):
+	-- settings = {
+	--     keepTrack = true,
+	--     duration = 2,
+	--     randomization = 0.3
+	-- }
+
+	-- 2. Chaotic magic particles:
+	-- settings = {
+	--     randomOffsets = true,
+	--     randomization = 0.8,
+	--     duration = 3,
+	--     keepTrack = false
+	-- }
+
+	-- 3. Precise guided missile:
+	-- settings = {
+	--     points = {Vector3.new(10, 20, 5)}, -- Specific arc
+	--     keepTrack = true,
+	--     speed = 25,
+	--     randomization = 0.1
+	-- }
+
+	-- 4. Custom shaped curve:
+	-- settings = {
+	--     offsets = {
+	--         Vector3.new(5, 10, 0),  -- Push first control point
+	--         Vector3.new(-8, 5, 3)   -- Push second control point
+	--     },
+	--     duration = 4,
+	--     keepTrack = true
+	-- }
+
+	-- 5. Speed-based consistent movement:
+	-- settings = {
+	--     speed = 15, -- Always moves at 15 studs/second
+	--     randomization = 0.5,
+	--     keepTrack = true
+	-- }
+
+	-- 6. Static target with dramatic curves:
+	-- settings = {
+	--     keepTrack = false,
+	--     duration = 5,
+	--     randomization = 0.9,
+	--     points = {
+	--         Vector3.new(5, 25, 8),
+	--         Vector3.new(15, 30, 12),
+	--         Vector3.new(25, 15, 18)
+	--     }
+	-- }
+
+	local curveVFX = BezierCurveVFX.new(attachmentConstraint, endPart, settings)
+	curveVFX:start()
+
+	return curveVFX
+end
+
+return BezierCurveVFX
